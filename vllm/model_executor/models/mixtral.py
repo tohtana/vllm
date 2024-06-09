@@ -363,6 +363,13 @@ class PhiMoE(nn.Module):
             self.ws = nn.Parameter(ws.to("cuda"), requires_grad=False)
             self.w2s = nn.Parameter(w2s.to("cuda"), requires_grad=False)
 
+            set_weight_attrs(self.ws, {
+                "weight_loader": self.weight_loader,
+            })
+            set_weight_attrs(self.w2s, {
+                "weight_loader": self.weight_loader,
+            })
+            
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_size = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
