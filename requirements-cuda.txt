@@ -13,4 +13,3 @@ cupy-cuda12x
 gitpython
 pytest
 loguru
-git+https://github.com/wenxcs/pycublas.git@moe-group-gemm
