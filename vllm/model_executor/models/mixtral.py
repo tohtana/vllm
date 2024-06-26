@@ -267,29 +267,8 @@ class PhiMoE(nn.Module):
                                      bias=False,
                                      params_dtype=self.params_dtype,
                                      quant_config=None)
-        if self.use_fp8:
-            cpu_or_gpu = 'cpu'
-        else:
-            cpu_or_gpu = 'cuda'
-        self.ws = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        2 * self.intermediate_size,
-                        self.hidden_size,
-                        device=cpu_or_gpu,
-                        dtype=self.params_dtype))
-        self.w2s = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        self.hidden_size,
-                        self.intermediate_size,
-                        device=cpu_or_gpu,
-                        dtype=self.params_dtype))
 
-        set_weight_attrs(self.ws, {
-            "weight_loader": self.weight_loader,
-        })
-        set_weight_attrs(self.w2s, {
-            "weight_loader": self.weight_loader,
-        })
+        self.prepare_parameter_update()
 
         # Scaling factors for FP8 weights
         self.ws_scale = nn.Parameter(
@@ -318,6 +297,33 @@ class PhiMoE(nn.Module):
             set_weight_attrs(self.a2s_scale, {
                 "weight_loader": self.weight_loader,
             })
+
+    def prepare_parameter_update(self):
+
+        if self.use_fp8:
+            cpu_or_gpu = 'cpu'
+        else:
+            cpu_or_gpu = 'cuda'
+
+        self.ws = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        2 * self.intermediate_size,
+                        self.hidden_size,
+                        device=cpu_or_gpu,
+                        dtype=self.params_dtype))
+        self.w2s = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        self.hidden_size,
+                        self.intermediate_size,
+                        device=cpu_or_gpu,
+                        dtype=self.params_dtype))
+
+        set_weight_attrs(self.ws, {
+            "weight_loader": self.weight_loader,
+        })
+        set_weight_attrs(self.w2s, {
+            "weight_loader": self.weight_loader,
+        })
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor,
                       weight_name: str, expert_id: int):
@@ -362,13 +368,6 @@ class PhiMoE(nn.Module):
 
             self.ws = nn.Parameter(ws.to("cuda"), requires_grad=False)
             self.w2s = nn.Parameter(w2s.to("cuda"), requires_grad=False)
-
-            set_weight_attrs(self.ws, {
-                "weight_loader": self.weight_loader,
-            })
-            set_weight_attrs(self.w2s, {
-                "weight_loader": self.weight_loader,
-            })
             
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_size = hidden_states.shape
@@ -685,6 +684,14 @@ class MixtralForCausalLM(nn.Module):
     ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
+
+    def prepare_parameter_update(self):
+        for layer in self.model.layers:
+            layer.block_sparse_moe.prepare_parameter_update()
+
+    def quantize_moe_layers(self):
+        for layer in self.model.layers:
+            layer.block_sparse_moe.process_weights_after_loading()
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
