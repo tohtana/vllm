@@ -268,7 +268,34 @@ class PhiMoE(nn.Module):
                                      params_dtype=self.params_dtype,
                                      quant_config=None)
 
-        self.prepare_parameter_update()
+        if self.use_fp8:
+            ws_dtype = torch.float8_e4m3fn
+        else:
+            ws_dtype = self.params_dtype
+
+        self.ws = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        2 * self.intermediate_size,
+                        self.hidden_size,
+                        device="cuda",
+                        dtype=ws_dtype))
+        self.w2s = nn.Parameter(
+            torch.empty(self.num_total_experts,
+                        self.hidden_size,
+                        self.intermediate_size,
+                        device="cuda",
+                        dtype=ws_dtype))
+
+        if self.use_fp8:
+            self.ws_buffer = torch.empty_like(self.ws.data, device="cpu", dtype=self.params_dtype)
+            self.w2s_buffer = torch.empty_like(self.w2s.data, device="cpu", dtype=self.params_dtype)
+
+        set_weight_attrs(self.ws, {
+            "weight_loader": self.weight_loader,
+        })
+        set_weight_attrs(self.w2s, {
+            "weight_loader": self.weight_loader,
+        })
 
         # Scaling factors for FP8 weights
         self.ws_scale = nn.Parameter(
@@ -298,37 +325,16 @@ class PhiMoE(nn.Module):
                 "weight_loader": self.weight_loader,
             })
 
-    def prepare_parameter_update(self):
-
-        if self.use_fp8:
-            cpu_or_gpu = 'cpu'
-        else:
-            cpu_or_gpu = 'cuda'
-
-        self.ws = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        2 * self.intermediate_size,
-                        self.hidden_size,
-                        device=cpu_or_gpu,
-                        dtype=self.params_dtype))
-        self.w2s = nn.Parameter(
-            torch.empty(self.num_total_experts,
-                        self.hidden_size,
-                        self.intermediate_size,
-                        device=cpu_or_gpu,
-                        dtype=self.params_dtype))
-
-        set_weight_attrs(self.ws, {
-            "weight_loader": self.weight_loader,
-        })
-        set_weight_attrs(self.w2s, {
-            "weight_loader": self.weight_loader,
-        })
-
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor,
                       weight_name: str, expert_id: int):
         tp_rank = get_tensor_model_parallel_rank()
         param_data = param.data
+        if self.use_fp8:
+            if weight_name.endswith("w1.weight") or weight_name.endswith("w3.weight"):
+                param_data = self.ws_buffer
+            if weight_name.endswith("w2.weight"):
+                param_data = self.w2s_buffer
+
         shard_size = self.intermediate_size
         shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
         if weight_name.endswith("w1.weight"):
@@ -339,6 +345,7 @@ class PhiMoE(nn.Module):
         if weight_name.endswith("w2.weight"):
             param_data[expert_id, :, :] = loaded_weight[:, shard]
         if "act_scale" in weight_name:
+            raise ValueError("Act scales should not be loaded here")
             param_data[:] = param_data[:].max(loaded_weight)
 
     def process_weights_after_loading(self):
@@ -347,9 +354,9 @@ class PhiMoE(nn.Module):
             w2s = torch.empty_like(self.w2s.data, dtype=torch.float8_e4m3fn)
             for expert in range(self.num_total_experts):
                 ws[expert, :, :], self.ws_scale[expert] = ops.scaled_fp8_quant(
-                    self.ws.data[expert, :, :])
+                    self.ws_buffer[expert, :, :])
                 w2s[expert, :, :], self.w2s_scale[
-                    expert] = ops.scaled_fp8_quant(self.w2s.data[expert, :, :])
+                    expert] = ops.scaled_fp8_quant(self.w2s_buffer[expert, :, :])
 
             def remove_subnormal_fp8(tensor):
                 assert tensor.dtype == torch.uint8, "Tensor must be a byte tensor representing fp8 values"
@@ -366,8 +373,9 @@ class PhiMoE(nn.Module):
             #remove_subnormal_fp8(ws.view(torch.uint8))
             #remove_subnormal_fp8(w2s.view(torch.uint8))
 
-            self.ws = nn.Parameter(ws.to("cuda"), requires_grad=False)
-            self.w2s = nn.Parameter(w2s.to("cuda"), requires_grad=False)
+            with torch.no_grad():
+                self.ws.copy_(ws)
+                self.w2s.copy_(w2s)
             
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         num_tokens, hidden_size = hidden_states.shape
@@ -686,8 +694,9 @@ class MixtralForCausalLM(nn.Module):
         return next_tokens
 
     def prepare_parameter_update(self):
-        for layer in self.model.layers:
-            layer.block_sparse_moe.prepare_parameter_update()
+        pass
+        # for layer in self.model.layers:
+        #     layer.block_sparse_moe.prepare_parameter_update()
 
     def quantize_moe_layers(self):
         for layer in self.model.layers:
