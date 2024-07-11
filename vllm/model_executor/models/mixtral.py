@@ -347,8 +347,13 @@ class PhiMoE(nn.Module):
                     param_data[expert_id, 0:shard_size, :].copy_(loaded_weight[0][shard, :])
                     self.ws_scale.copy_(loaded_weight[1])
             if weight_name.endswith("w3.weight"):
-                param_data[expert_id,
-                        shard_size:2 * shard_size, :].copy_(loaded_weight[shard, :])
+                if torch.is_tensor(loaded_weight):
+                    param_data[expert_id,
+                            shard_size:2 * shard_size, :].copy_(loaded_weight[shard, :])
+                else:
+                    assert isinstance(loaded_weight, tuple)
+                    param_data[expert_id,
+                            shard_size:2 * shard_size, :].copy_(loaded_weight[0][shard, :])
             if weight_name.endswith("w2.weight"):
                 if torch.is_tensor(loaded_weight):
                     param_data[expert_id, :, :] = loaded_weight[:, shard]
