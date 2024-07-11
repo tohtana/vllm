@@ -330,23 +330,36 @@ class PhiMoE(nn.Module):
         tp_rank = get_tensor_model_parallel_rank()
         param_data = param.data
         if self.use_fp8:
-            if weight_name.endswith("w1.weight") or weight_name.endswith("w3.weight"):
+            if (weight_name.endswith("w1.weight") or weight_name.endswith("w3.weight")) and torch.is_tensor(loaded_weight):
                 param_data = self.ws_buffer
-            if weight_name.endswith("w2.weight"):
+            if weight_name.endswith("w2.weight") and torch.is_tensor(loaded_weight):
                 param_data = self.w2s_buffer
 
         shard_size = self.intermediate_size
         shard = slice(tp_rank * shard_size, (tp_rank + 1) * shard_size)
-        if weight_name.endswith("w1.weight"):
-            param_data[expert_id, 0:shard_size, :] = loaded_weight[shard, :]
-        if weight_name.endswith("w3.weight"):
-            param_data[expert_id,
-                       shard_size:2 * shard_size, :] = loaded_weight[shard, :]
-        if weight_name.endswith("w2.weight"):
-            param_data[expert_id, :, :] = loaded_weight[:, shard]
-        if "act_scale" in weight_name:
-            raise ValueError("Act scales should not be loaded here")
-            param_data[:] = param_data[:].max(loaded_weight)
+
+        with torch.no_grad():
+            if weight_name.endswith("w1.weight"):
+                print(f"Loading weight self={self.__class__} {weight_name} for expert {expert_id}")
+                if torch.is_tensor(loaded_weight):
+                    param_data[expert_id, 0:shard_size, :] = loaded_weight[shard, :]
+                else:
+                    assert isinstance(loaded_weight, tuple)
+                    param_data[expert_id, 0:shard_size, :].copy_(loaded_weight[0][shard, :])
+                    self.ws_scale = loaded_weight[1]
+            if weight_name.endswith("w3.weight"):
+                param_data[expert_id,
+                        shard_size:2 * shard_size, :].copy_(loaded_weight[shard, :])
+            if weight_name.endswith("w2.weight"):
+                if torch.is_tensor(loaded_weight):
+                    param_data[expert_id, :, :] = loaded_weight[:, shard]
+                else:
+                    assert isinstance(loaded_weight, tuple)
+                    param_data[expert_id, :, :].copy_(loaded_weight[0][:, shard])
+                    self.w2s_scale = loaded_weight[1]
+            if "act_scale" in weight_name:
+                raise ValueError("Act scales should not be loaded here")
+                param_data[:] = param_data[:].max(loaded_weight)
 
     def process_weights_after_loading(self):
         if self.use_fp8:
@@ -699,8 +712,11 @@ class MixtralForCausalLM(nn.Module):
         #     layer.block_sparse_moe.prepare_parameter_update()
 
     def quantize_moe_layers(self):
+        import time
+        start = time.time()
         for layer in self.model.layers:
             layer.block_sparse_moe.process_weights_after_loading()
+        print("Quantization took", time.time() - start, "seconds")
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
