@@ -340,7 +340,6 @@ class PhiMoE(nn.Module):
 
         with torch.no_grad():
             if weight_name.endswith("w1.weight"):
-                print(f"Loading weight self={self.__class__} {weight_name} for expert {expert_id}")
                 if torch.is_tensor(loaded_weight):
                     param_data[expert_id, 0:shard_size, :] = loaded_weight[shard, :]
                 else:
