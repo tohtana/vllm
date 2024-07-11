@@ -345,7 +345,7 @@ class PhiMoE(nn.Module):
                 else:
                     assert isinstance(loaded_weight, tuple)
                     param_data[expert_id, 0:shard_size, :].copy_(loaded_weight[0][shard, :])
-                    self.ws_scale.copy_(loaded_weight[1])
+                    self.ws_scale[expert_id] = loaded_weight[1].item()
             if weight_name.endswith("w3.weight"):
                 if torch.is_tensor(loaded_weight):
                     param_data[expert_id,
@@ -360,7 +360,7 @@ class PhiMoE(nn.Module):
                 else:
                     assert isinstance(loaded_weight, tuple)
                     param_data[expert_id, :, :].copy_(loaded_weight[0][:, shard])
-                    self.w2s_scale.copy_(loaded_weight[1])
+                    self.w2s_scale[expert_id] = loaded_weight[1].item()
             if "act_scale" in weight_name:
                 raise ValueError("Act scales should not be loaded here")
                 param_data[:] = param_data[:].max(loaded_weight)
