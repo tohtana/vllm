@@ -710,10 +710,6 @@ class MixtralForCausalLM(nn.Module):
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
 
-    def quantize_moe_layers(self):
-        for layer in self.model.layers:
-            layer.block_sparse_moe.process_weights_after_loading()
-
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
