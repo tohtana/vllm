@@ -76,6 +76,8 @@ class EngineArgs:
     num_speculative_tokens: Optional[int] = None
     speculative_max_model_len: Optional[int] = None
 
+    offload: bool = False
+
     def __post_init__(self):
         if self.tokenizer is None:
             self.tokenizer = self.model
@@ -469,7 +471,7 @@ class EngineArgs:
         return engine_args
 
     def create_engine_config(self, ) -> EngineConfig:
-        device_config = DeviceConfig(self.device)
+        device_config = DeviceConfig(self.device, self.offload)
         model_config = ModelConfig(
             self.model, self.tokenizer, self.tokenizer_mode,
             self.trust_remote_code, self.dtype, self.seed, self.revision,

@@ -641,7 +641,7 @@ class SchedulerConfig:
 
 class DeviceConfig:
 
-    def __init__(self, device: str = "auto") -> None:
+    def __init__(self, device: str = "auto", offload: bool = False) -> None:
         if device == "auto":
             # Automated device type detection
             if is_neuron():
@@ -662,6 +662,9 @@ class DeviceConfig:
         else:
             # Set device with device type
             self.device = torch.device(self.device_type)
+
+        assert self.device == torch.device("cuda") or not offload, "Offload is only supported on GPU."
+        self.offload = offload
 
 
 class SpeculativeConfig:
