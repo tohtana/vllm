@@ -747,6 +747,10 @@ class MixtralForCausalLM(nn.Module):
                 if name.endswith(".bias") and name not in params_dict:
                     continue
                 param = params_dict[name]
+
+                if param.device != torch.device("cuda"):
+                    param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
                 break
@@ -756,6 +760,10 @@ class MixtralForCausalLM(nn.Module):
                         continue
                     name = name.replace(weight_name, param_name)
                     param = params_dict[name]
+
+                    if param.device != torch.device("cuda"):
+                        param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+
                     weight_loader = param.weight_loader
                     weight_loader(param,
                                   loaded_weight,
@@ -767,6 +775,10 @@ class MixtralForCausalLM(nn.Module):
                     if name.endswith(".bias") and name not in params_dict:
                         continue
                     param = params_dict[name]
+
+                    if param.device != torch.device("cuda"):
+                        param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)
                     weight_loader(param, loaded_weight)
