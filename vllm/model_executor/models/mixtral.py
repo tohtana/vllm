@@ -734,6 +734,11 @@ class MixtralForCausalLM(nn.Module):
             for weight_name in ["w1", "w2", "w3"]
         ]
 
+        def _materialize_meta_tensor_on_cuda(p):
+            if p.device.type != torch.device("cuda").type and hasattr(p, "meta"):
+                p.data = torch.empty_like(p.meta, device=torch.device("cuda"))
+                del p.meta
+
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
@@ -748,8 +753,7 @@ class MixtralForCausalLM(nn.Module):
                     continue
                 param = params_dict[name]
 
-                if param.device != torch.device("cuda"):
-                    param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+                _materialize_meta_tensor_on_cuda(param)
 
                 weight_loader = param.weight_loader
                 weight_loader(param, loaded_weight, shard_id)
@@ -761,8 +765,7 @@ class MixtralForCausalLM(nn.Module):
                     name = name.replace(weight_name, param_name)
                     param = params_dict[name]
 
-                    if param.device != torch.device("cuda"):
-                        param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+                    _materialize_meta_tensor_on_cuda(param)
 
                     weight_loader = param.weight_loader
                     weight_loader(param,
@@ -776,8 +779,7 @@ class MixtralForCausalLM(nn.Module):
                         continue
                     param = params_dict[name]
 
-                    if param.device != torch.device("cuda"):
-                        param.data = torch.empty_like(param.meta, device=torch.device("cuda"))
+                    _materialize_meta_tensor_on_cuda(param)
 
                     weight_loader = getattr(param, "weight_loader",
                                             default_weight_loader)
